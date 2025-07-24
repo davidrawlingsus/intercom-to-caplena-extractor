@@ -25,7 +25,7 @@ class DailySync {
 
       logger.info(`Fetching conversations since ${new Date(startTime * 1000).toISOString()}`);
       
-      const conversations = await this.intercomService.getConversationsSince(startTime);
+      const conversations = await this.intercomService.getConversationsWithTranscriptsSince(startTime);
       
       if (!conversations || conversations.length === 0) {
         logger.info('No new conversations found in the last 24 hours');
@@ -112,7 +112,7 @@ class DailySync {
 
       logger.info(`Fetching conversations since ${new Date(startTime * 1000).toISOString()}`);
       
-      const conversations = await this.intercomService.getConversationsSince(startTime);
+      const conversations = await this.intercomService.getConversationsWithTranscriptsSince(startTime);
       
       if (!conversations || conversations.length === 0) {
         logger.info(`No conversations found in the last ${hoursBack} hours`);

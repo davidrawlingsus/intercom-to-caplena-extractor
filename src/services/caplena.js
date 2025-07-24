@@ -107,6 +107,46 @@ class CaplenaService {
             type: 'text'
           },
           {
+            name: 'source_url',
+            type: 'text'
+          },
+          {
+            name: 'location_city',
+            type: 'text'
+          },
+          {
+            name: 'location_region',
+            type: 'text'
+          },
+          {
+            name: 'location_country',
+            type: 'text'
+          },
+          {
+            name: 'contact_id',
+            type: 'text'
+          },
+          {
+            name: 'browser',
+            type: 'text'
+          },
+          {
+            name: 'browser_version',
+            type: 'text'
+          },
+          {
+            name: 'browser_language',
+            type: 'text'
+          },
+          {
+            name: 'os',
+            type: 'text'
+          },
+          {
+            name: 'referrer',
+            type: 'text'
+          },
+          {
             name: 'user_message_count',
             type: 'numerical'
           },
@@ -128,6 +168,30 @@ class CaplenaService {
     } catch (error) {
       logger.error('Failed to create Caplena project', { 
         projectName, 
+        error: error.message,
+        response: error.response?.data 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a project in Caplena
+   */
+  async deleteProject(projectId) {
+    try {
+      logger.info('Deleting Caplena project', { projectId });
+      
+      const response = await this.client.delete(`/v2/projects/${projectId}`);
+      
+      logger.info('Successfully deleted Caplena project', {
+        projectId: projectId
+      });
+
+      return response.data;
+    } catch (error) {
+      logger.error('Failed to delete Caplena project', { 
+        projectId, 
         error: error.message,
         response: error.response?.data 
       });
@@ -211,6 +275,46 @@ class CaplenaService {
         {
           ref: 'subject',
           value: conversation.subject || ''
+        },
+        {
+          ref: 'source_url',
+          value: conversation.sourceUrl || ''
+        },
+        {
+          ref: 'location_city',
+          value: conversation.locationCity || ''
+        },
+        {
+          ref: 'location_region',
+          value: conversation.locationRegion || ''
+        },
+        {
+          ref: 'location_country',
+          value: conversation.locationCountry || ''
+        },
+        {
+          ref: 'contact_id',
+          value: conversation.contactId || ''
+        },
+        {
+          ref: 'browser',
+          value: conversation.browser || ''
+        },
+        {
+          ref: 'browser_version',
+          value: conversation.browserVersion || ''
+        },
+        {
+          ref: 'browser_language',
+          value: conversation.browserLanguage || ''
+        },
+        {
+          ref: 'os',
+          value: conversation.os || ''
+        },
+        {
+          ref: 'referrer',
+          value: conversation.referrer || ''
         },
         {
           ref: 'user_message_count',

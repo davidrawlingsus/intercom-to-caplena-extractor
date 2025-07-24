@@ -156,6 +156,25 @@ class IntercomService {
   }
 
   /**
+   * Get contact details by ID
+   */
+  async getContact(contactId) {
+    try {
+      logger.info('Fetching contact details', { contactId });
+      
+      const response = await this.client.get(`/contacts/${contactId}`);
+      
+      return response.data;
+    } catch (error) {
+      logger.error('Failed to fetch contact', { 
+        contactId, 
+        error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Get conversations with full transcripts (limited to specified count)
    */
   async getAllConversationsWithTranscripts(limit = null, csvExporter = null) {
@@ -215,6 +234,21 @@ class IntercomService {
         const conversationPromises = conversationsToProcess.map(async (conversation) => {
           try {
             const fullConversation = await this.getConversation(conversation.id);
+            
+            // Fetch contact details for device information if contact exists
+            if (fullConversation.contacts?.contacts?.[0]?.id) {
+              try {
+                const contact = await this.getContact(fullConversation.contacts.contacts[0].id);
+                // Merge contact data into conversation for easier access
+                fullConversation.contactDetails = contact;
+              } catch (contactError) {
+                logger.warn('Failed to fetch contact details', { 
+                  contactId: fullConversation.contacts.contacts[0].id,
+                  error: contactError.message 
+                });
+              }
+            }
+            
             return fullConversation;
           } catch (error) {
             logger.warn('Failed to fetch full conversation', { 
@@ -294,6 +328,122 @@ class IntercomService {
   }
 
   /**
+   * Get conversations since a timestamp with full transcript data and metadata
+   */
+  async getConversationsWithTranscriptsSince(sinceTimestamp, limit = 1000) {
+    try {
+      logger.info('Fetching conversations with transcripts since timestamp', { 
+        sinceTimestamp, 
+        sinceDate: new Date(sinceTimestamp * 1000).toISOString(),
+        limit 
+      });
+
+      const conversations = [];
+      let page = 1;
+      let startingAfter = null;
+      let hasMore = true;
+
+      while (hasMore && conversations.length < limit) {
+        const response = await this.getConversations(page, 50, startingAfter);
+        
+        if (!response.conversations || response.conversations.length === 0) {
+          logger.info('No more conversations found');
+          break;
+        }
+
+        // Filter conversations by timestamp
+        const filteredConversations = response.conversations.filter(conversation => {
+          const updatedAt = parseInt(conversation.updated_at);
+          return updatedAt >= sinceTimestamp;
+        });
+
+        // If we find conversations older than our timestamp, we can stop
+        if (filteredConversations.length < response.conversations.length) {
+          logger.info('Found conversations older than timestamp, stopping pagination');
+          
+          // Fetch full details for the filtered conversations
+          for (const conversation of filteredConversations) {
+            try {
+              const fullConversation = await this.getConversation(conversation.id);
+              
+              // Fetch contact details if available
+              if (fullConversation.contacts?.contacts?.[0]?.id) {
+                const contactId = fullConversation.contacts.contacts[0].id;
+                try {
+                  const contactDetails = await this.getContact(contactId);
+                  fullConversation.contactDetails = contactDetails;
+                } catch (contactError) {
+                  logger.warn('Failed to fetch contact details', { 
+                    contactId, 
+                    error: contactError.message 
+                  });
+                }
+              }
+              
+              conversations.push(fullConversation);
+            } catch (error) {
+              logger.warn('Failed to fetch full conversation details', { 
+                conversationId: conversation.id, 
+                error: error.message 
+              });
+            }
+          }
+          break;
+        }
+
+        // Fetch full details for all conversations in this page
+        for (const conversation of filteredConversations) {
+          try {
+            const fullConversation = await this.getConversation(conversation.id);
+            
+            // Fetch contact details if available
+            if (fullConversation.contacts?.contacts?.[0]?.id) {
+              const contactId = fullConversation.contacts.contacts[0].id;
+              try {
+                const contactDetails = await this.getContact(contactId);
+                fullConversation.contactDetails = contactDetails;
+              } catch (contactError) {
+                logger.warn('Failed to fetch contact details', { 
+                  contactId, 
+                  error: contactError.message 
+                });
+              }
+            }
+            
+            conversations.push(fullConversation);
+          } catch (error) {
+            logger.warn('Failed to fetch full conversation details', { 
+              conversationId: conversation.id, 
+              error: error.message 
+            });
+          }
+        }
+
+        // Check if we have more pages
+        if (response.pages && response.pages.next) {
+          startingAfter = response.pages.next.starting_after;
+          page++;
+        } else {
+          hasMore = false;
+        }
+
+        // Add a small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      logger.info(`Found ${conversations.length} conversations with transcripts since timestamp`);
+      return conversations;
+
+    } catch (error) {
+      logger.error('Failed to fetch conversations with transcripts since timestamp', { 
+        sinceTimestamp, 
+        error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Check if a conversation contains user messages
    */
   hasUserMessages(conversation) {
@@ -351,32 +501,86 @@ class IntercomService {
       'I would be interested in receiving a cataloque. My name is A Lawson',
       'Yes, please do that.',
       'Maybe – what\'s in it?', // Fixed: using en dash (–) instead of hyphen (-)
-      'Please add these'
+      'Please add these',
+      'Sound great, send it over',
+      'Yes, everything makes sense – thank you.',
+      'Yes, I have a question.',
+      'I have a question.',
+      'I see, thank you.',
+      'Thank you for the info.'
     ];
 
     // Filter out stock responses
+    // console.log('DEBUG: Processing', userMessages.length, 'user messages');
     const filteredUserMessages = userMessages.filter(part => {
       const messageBody = part.body || '';
       const cleanBody = messageBody.replace(/<[^>]*>/g, '').trim(); // Remove HTML tags
       
       // Check if the message is a stock response (normalized comparison)
-      const normalizedCleanBody = cleanBody.toLowerCase().replace(/\s+/g, ' ').trim();
+      const normalizedCleanBody = cleanBody
+        .toLowerCase()
+        .replace(/[\u2018\u2019]/g, "'") // Normalize apostrophes
+        .replace(/[\u201C\u201D]/g, '"') // Normalize quotes
+        .replace(/\s+/g, ' ')
+        .trim();
       
-      return !stockResponses.some(stockResponse => {
-        const normalizedStockResponse = stockResponse.toLowerCase().replace(/\s+/g, ' ').trim();
-        return normalizedCleanBody === normalizedStockResponse;
+      const isStock = stockResponses.some(stockResponse => {
+        const normalizedStockResponse = stockResponse
+          .toLowerCase()
+          .replace(/[\u2018\u2019]/g, "'") // Normalize apostrophes
+          .replace(/[\u201C\u201D]/g, '"') // Normalize quotes
+          .replace(/\s+/g, ' ')
+          .trim();
+        const matches = normalizedCleanBody === normalizedStockResponse;
+        if (cleanBody.includes('Maybe') || cleanBody.includes('everything makes sense')) {
+          // console.log('DEBUG: Message:', JSON.stringify(cleanBody));
+          // console.log('DEBUG: Normalized:', JSON.stringify(normalizedCleanBody));
+          // console.log('DEBUG: Stock response:', JSON.stringify(stockResponse));
+          // console.log('DEBUG: Normalized stock:', JSON.stringify(normalizedStockResponse));
+          // console.log('DEBUG: Matches:', matches);
+          // console.log('---');
+        }
+        return matches;
       });
+      
+      return !isStock;
     });
+    // console.log('DEBUG: After filtering,', filteredUserMessages.length, 'messages remain');
     
     if (filteredUserMessages.length === 0) {
       return null; // No meaningful user messages after filtering
     }
+
+    // Extract additional metadata
+    const sourceUrl = conversation.first_contact_reply?.url || '';
+    const contactId = conversation.contacts?.contacts?.[0]?.id;
+    
+    // Extract device information and location from contact details
+    const contactDetails = conversation.contactDetails || {};
+    const location = contactDetails.location || {};
+    const deviceInfo = {
+      browser: contactDetails.browser || '',
+      browserVersion: contactDetails.browser_version || '',
+      browserLanguage: contactDetails.browser_language || '',
+      os: contactDetails.os || '',
+      referrer: contactDetails.referrer || ''
+    };
     
     return {
       conversationId: conversation.id,
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
       subject: conversation.conversation_message?.subject || '',
+      sourceUrl: sourceUrl,
+      locationCity: location.city || '',
+      locationRegion: location.region || '',
+      locationCountry: location.country || '',
+      contactId: contactId || '',
+      browser: deviceInfo.browser,
+      browserVersion: deviceInfo.browserVersion,
+      browserLanguage: deviceInfo.browserLanguage,
+      os: deviceInfo.os,
+      referrer: deviceInfo.referrer,
       messages: filteredUserMessages.map(part => ({
         id: part.id,
         type: part.part_type,
