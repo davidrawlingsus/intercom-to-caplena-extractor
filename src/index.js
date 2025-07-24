@@ -41,15 +41,15 @@ class IntercomTranscriptExtractor {
       logger.info('Exporting transcripts to CSV...');
       const outputPath = await this.csvExporter.exportToCSV(transcripts);
 
-      // Step 4: Find Caplena project
-      logger.info(`Looking for Caplena project: ${projectName}`);
-      const project = await this.caplenaService.findProjectByName(projectName);
+      // Step 4: Ensure Caplena project exists (create if needed)
+      logger.info(`Ensuring Caplena project exists: ${projectName}`);
+      const project = await this.caplenaService.ensureProjectExists(projectName, 'Intercom conversations export');
       
       if (!project) {
-        logger.error(`Project not found: ${projectName}`);
+        logger.error(`Failed to create or find project: ${projectName}`);
         return {
           success: false,
-          error: `Project not found: ${projectName}`,
+          error: `Failed to create or find project: ${projectName}`,
           outputPath,
           stats: this.csvExporter.getExportStats(transcripts)
         };
@@ -67,7 +67,8 @@ class IntercomTranscriptExtractor {
         success: true,
         outputPath,
         stats,
-        uploadResult
+        uploadResult,
+        project
       };
 
     } catch (error) {
@@ -128,6 +129,79 @@ class IntercomTranscriptExtractor {
       return false;
     }
   }
+
+  /**
+   * Upload existing CSV data to Caplena (without fetching from Intercom)
+   */
+  async uploadExistingDataToCaplena(projectName = 'MRT - Intercom chats') {
+    try {
+      logger.info('Starting Caplena upload of existing CSV data');
+
+      // Step 1: Read existing CSV data
+      logger.info('Reading existing CSV data...');
+      const csvData = await this.csvExporter.readExistingCSV();
+      
+      if (!csvData || csvData.length === 0) {
+        logger.warn('No CSV data found to upload');
+        return {
+          success: false,
+          error: 'No CSV data found to upload'
+        };
+      }
+
+      logger.info(`Found ${csvData.length} records in CSV`);
+
+      // Step 2: Transform CSV data to conversation format
+      logger.info('Transforming CSV data for Caplena...');
+      const conversations = csvData.map(row => ({
+        conversationId: row.conversation_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        subject: row.subject || '',
+        messages: [
+          {
+            id: row.message_id,
+            body: row.message_body,
+            author: { type: row.author_type }
+          }
+        ]
+      }));
+
+      logger.info(`Transformed ${conversations.length} conversations`);
+
+      // Step 3: Ensure Caplena project exists
+      logger.info(`Ensuring Caplena project exists: ${projectName}`);
+      const project = await this.caplenaService.ensureProjectExists(projectName, 'Intercom conversations export');
+      
+      if (!project) {
+        logger.error(`Failed to create or find project: ${projectName}`);
+        return {
+          success: false,
+          error: `Failed to create or find project: ${projectName}`
+        };
+      }
+
+      // Step 4: Upload to Caplena
+      logger.info('Uploading conversations to Caplena...');
+      const uploadResult = await this.caplenaService.uploadConversations(project.id, conversations);
+
+      logger.info('Caplena upload process completed successfully', { uploadResult });
+
+      return {
+        success: true,
+        uploadResult,
+        project,
+        stats: {
+          conversationCount: conversations.length,
+          totalMessages: conversations.length
+        }
+      };
+
+    } catch (error) {
+      logger.error('Caplena upload process failed', { error: error.message });
+      throw error;
+    }
+  }
 }
 
 // Main execution
@@ -135,54 +209,44 @@ async function main() {
   const extractor = new IntercomTranscriptExtractor();
 
   try {
-    // Test connections first
-    const intercomConnectionOk = await extractor.testConnection();
-    if (!intercomConnectionOk) {
-      logger.error('Cannot proceed without valid Intercom API connection');
-      process.exit(1);
-    }
-
-    // Test Caplena connection (optional for now)
+    // Test Caplena connection
     let caplenaConnectionOk = false;
     try {
       caplenaConnectionOk = await extractor.caplenaService.testConnection();
       if (!caplenaConnectionOk) {
-        logger.warn('Caplena API connection failed - will proceed with CSV export only');
+        logger.error('Cannot proceed without valid Caplena API connection');
+        console.log('❌ Caplena API connection failed');
+        process.exit(1);
       }
+      console.log('✅ Caplena API connection successful');
     } catch (error) {
-      logger.warn('Caplena API connection failed - will proceed with CSV export only', { error: error.message });
+      logger.error('Caplena API connection failed', { error: error.message });
+      console.log('❌ Caplena API connection failed:', error.message);
+      process.exit(1);
     }
 
-    // Run extraction and upload (or just extraction if Caplena is not available)
-    let result;
-    if (caplenaConnectionOk) {
-      result = await extractor.extractAndUpload();
-    } else {
-      // Fallback to just extraction
-      result = await extractor.extractAndExport();
-    }
+    // Upload existing CSV data to Caplena
+    console.log('📤 Uploading existing CSV data to Caplena...');
+    const result = await extractor.uploadExistingDataToCaplena();
     
     if (result.success) {
-      logger.info('✅ Extraction completed successfully!', result.stats);
-      console.log(`\n📁 Transcripts exported to: ${result.outputPath}`);
+      logger.info('✅ Caplena upload completed successfully!', result.stats);
+      console.log(`\n✅ Caplena upload completed successfully!`);
       console.log(`📊 Statistics:`);
       console.log(`   - Conversations: ${result.stats.conversationCount}`);
       console.log(`   - Total Messages: ${result.stats.totalMessages}`);
-      
-      if (result.uploadResult) {
-        console.log(`📤 Caplena Upload:`);
-        console.log(`   - Project: MRT - Intercom chats`);
-        console.log(`   - Uploaded: ${result.uploadResult.uploadedCount} conversations`);
-      } else {
-        console.log(`📤 Caplena Upload: Skipped (API connection failed)`);
-      }
+      console.log(`📤 Caplena Upload:`);
+      console.log(`   - Project: ${result.project?.name || 'MRT - Intercom chats'}`);
+      console.log(`   - Project ID: ${result.project?.id || 'N/A'}`);
+      console.log(`   - Uploaded: ${result.uploadResult.uploadedCount} conversations`);
+      console.log(`   - Batches: ${result.uploadResult.batchCount}`);
     } else {
-      console.log(`\n❌ Process failed: ${result.error}`);
+      console.log(`\n❌ Upload failed: ${result.error}`);
     }
 
   } catch (error) {
-    logger.error('❌ Extraction failed', { error: error.message });
-    console.error('\n❌ Extraction failed:', error.message);
+    logger.error('❌ Upload failed', { error: error.message });
+    console.error('\n❌ Upload failed:', error.message);
     process.exit(1);
   }
 }

@@ -266,6 +266,82 @@ class CSVExporter {
       filePath: this.outputPath
     };
   }
+
+  /**
+   * Read existing CSV file and parse into data objects
+   */
+  async readExistingCSV() {
+    try {
+      // Check if file exists
+      try {
+        await fs.access(this.outputPath);
+      } catch (error) {
+        logger.warn('CSV file does not exist', { filePath: this.outputPath });
+        return [];
+      }
+
+      // Read the file
+      const fileContent = await fs.readFile(this.outputPath, 'utf8');
+      const lines = fileContent.trim().split('\n');
+      
+      if (lines.length <= 1) {
+        logger.warn('CSV file is empty or only contains headers');
+        return [];
+      }
+
+      // Parse headers
+      const headers = lines[0].split(',').map(h => h.replace(/"/g, ''));
+      
+      // Parse data rows
+      const data = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        const values = this.parseCSVLine(line);
+        
+        if (values.length === headers.length) {
+          const row = {};
+          headers.forEach((header, index) => {
+            row[header] = values[index].replace(/"/g, '');
+          });
+          data.push(row);
+        }
+      }
+
+      logger.info(`Successfully read ${data.length} records from CSV`);
+      return data;
+    } catch (error) {
+      logger.error('Failed to read existing CSV file', { 
+        filePath: this.outputPath, 
+        error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Parse a CSV line, handling quoted values
+   */
+  parseCSVLine(line) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        values.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    
+    values.push(current);
+    return values;
+  }
 }
 
 module.exports = CSVExporter; 

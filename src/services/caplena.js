@@ -7,7 +7,7 @@ class CaplenaService {
     this.client = axios.create({
       baseURL: config.caplena.baseUrl,
       headers: {
-        'Authorization': `Bearer ${config.caplena.apiKey}`,
+        'Caplena-API-Key': config.caplena.apiKey,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       },
@@ -43,7 +43,7 @@ class CaplenaService {
     try {
       logger.info('Fetching Caplena projects...');
       
-      const response = await this.client.get('/api/projects');
+      const response = await this.client.get('/v2/projects');
       
       return response.data;
     } catch (error) {
@@ -57,7 +57,8 @@ class CaplenaService {
    */
   async findProjectByName(projectName) {
     try {
-      const projects = await this.getProjects();
+      const response = await this.getProjects();
+      const projects = response.results || response; // Handle both response formats
       const project = projects.find(p => p.name === projectName);
       
       if (!project) {
@@ -74,7 +75,94 @@ class CaplenaService {
   }
 
   /**
-   * Transform conversation data to Caplena format
+   * Create a new project in Caplena
+   */
+  async createProject(projectName, description = '') {
+    try {
+      logger.info('Creating new Caplena project', { projectName, description });
+      
+      const projectData = {
+        name: projectName,
+        description: description || `Intercom conversations export - ${new Date().toISOString().split('T')[0]}`,
+        language: 'en', // Required field
+        columns: [
+          {
+            name: 'text',
+            type: 'text_to_analyze'
+          },
+          {
+            name: 'conversation_id',
+            type: 'text'
+          },
+          {
+            name: 'created_at',
+            type: 'text'
+          },
+          {
+            name: 'updated_at',
+            type: 'text'
+          },
+          {
+            name: 'subject',
+            type: 'text'
+          },
+          {
+            name: 'user_message_count',
+            type: 'numerical'
+          },
+          {
+            name: 'total_message_count',
+            type: 'numerical'
+          }
+        ]
+      };
+
+      const response = await this.client.post('/v2/projects', projectData);
+      
+      logger.info('Successfully created Caplena project', {
+        projectId: response.data.id,
+        projectName: response.data.name
+      });
+
+      return response.data;
+    } catch (error) {
+      logger.error('Failed to create Caplena project', { 
+        projectName, 
+        error: error.message,
+        response: error.response?.data 
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create project if it doesn't exist, or return existing project
+   */
+  async ensureProjectExists(projectName, description = '') {
+    try {
+      // First try to find existing project
+      const existingProject = await this.findProjectByName(projectName);
+      
+      if (existingProject) {
+        logger.info('Using existing project', {
+          projectId: existingProject.id,
+          projectName: existingProject.name
+        });
+        return existingProject;
+      }
+
+      // Create new project if it doesn't exist
+      logger.info('Project not found, creating new project', { projectName });
+      return await this.createProject(projectName, description);
+      
+    } catch (error) {
+      logger.error('Failed to ensure project exists', { projectName, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Transform conversation data to Caplena bulk rows format
    */
   transformConversationForCaplena(conversation) {
     if (!conversation || !conversation.messages) {
@@ -100,54 +188,119 @@ class CaplenaService {
       return null;
     }
 
+    // Format for Caplena bulk rows API
     return {
-      text: userText,
-      metadata: {
-        conversation_id: conversation.conversationId,
-        created_at: conversation.createdAt,
-        updated_at: conversation.updatedAt,
-        subject: conversation.subject,
-        user_message_count: userMessages.length,
-        total_message_count: conversation.messages.length
-      }
+      columns: [
+        {
+          ref: 'text',
+          value: userText,
+          was_reviewed: false
+        },
+        {
+          ref: 'conversation_id',
+          value: conversation.conversationId || ''
+        },
+        {
+          ref: 'created_at',
+          value: String(conversation.createdAt || '')
+        },
+        {
+          ref: 'updated_at',
+          value: String(conversation.updatedAt || '')
+        },
+        {
+          ref: 'subject',
+          value: conversation.subject || ''
+        },
+        {
+          ref: 'user_message_count',
+          value: userMessages.length
+        },
+        {
+          ref: 'total_message_count',
+          value: conversation.messages.length
+        }
+      ]
     };
   }
 
   /**
-   * Upload conversation data to Caplena project
+   * Upload conversation data to Caplena project using bulk rows API
    */
   async uploadConversations(projectId, conversations) {
     try {
       logger.info(`Uploading ${conversations.length} conversations to Caplena project ${projectId}`);
       
       // Transform conversations to Caplena format
-      const caplenaData = conversations
+      const caplenaRows = conversations
         .map(conversation => this.transformConversationForCaplena(conversation))
         .filter(data => data !== null);
 
-      if (caplenaData.length === 0) {
+      if (caplenaRows.length === 0) {
         logger.warn('No valid conversation data to upload');
         return { success: false, message: 'No valid data to upload' };
       }
 
-      logger.info(`Transformed ${caplenaData.length} conversations for Caplena upload`);
+      logger.info(`Transformed ${caplenaRows.length} conversations for Caplena upload`);
 
-      // Upload data to Caplena
-      const response = await this.client.post(`/api/projects/${projectId}/data`, {
-        data: caplenaData
-      });
+      // Upload data in batches of 20 (API limit)
+      const batchSize = 20;
+      const batches = [];
+      for (let i = 0; i < caplenaRows.length; i += batchSize) {
+        batches.push(caplenaRows.slice(i, i + batchSize));
+      }
 
-      logger.info('Successfully uploaded conversations to Caplena', {
+      logger.info(`Uploading ${caplenaRows.length} rows in ${batches.length} batches`);
+
+      const uploadResults = [];
+      let totalUploaded = 0;
+
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        logger.info(`Uploading batch ${i + 1}/${batches.length} with ${batch.length} rows`);
+
+        try {
+          const response = await this.client.post(`/v2/projects/${projectId}/rows/bulk`, batch);
+          
+          logger.info(`Successfully uploaded batch ${i + 1}`, {
+            status: response.data.status,
+            taskId: response.data.task_id,
+            queuedRowsCount: response.data.queued_rows_count,
+            estimatedMinutes: response.data.estimated_minutes,
+            resultsCount: response.data.results?.length || 0
+          });
+
+          uploadResults.push(response.data);
+          totalUploaded += response.data.queued_rows_count;
+
+          // Rate limiting: wait 100ms between requests (10 requests per second limit)
+          if (i < batches.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+
+        } catch (error) {
+          logger.error(`Failed to upload batch ${i + 1}`, { 
+            batchIndex: i,
+            error: error.message,
+            response: error.response?.data 
+          });
+          throw error;
+        }
+      }
+
+      logger.info('Successfully uploaded all conversations to Caplena', {
         projectId,
-        uploadedCount: caplenaData.length,
-        responseId: response.data?.id
+        totalUploaded,
+        batchCount: batches.length,
+        uploadResults: uploadResults.length
       });
 
       return {
         success: true,
-        uploadedCount: caplenaData.length,
+        uploadedCount: totalUploaded,
         projectId,
-        responseId: response.data?.id
+        batchCount: batches.length,
+        uploadResults
       };
 
     } catch (error) {
