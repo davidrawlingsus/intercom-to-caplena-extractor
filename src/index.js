@@ -225,13 +225,13 @@ async function main() {
       process.exit(1);
     }
 
-    // Upload existing CSV data to Caplena
-    console.log('📤 Uploading existing CSV data to Caplena...');
-    const result = await extractor.uploadExistingDataToCaplena();
+    // Fetch fresh data from Intercom and upload to Caplena
+    console.log('🔄 Fetching fresh data from Intercom and uploading to Caplena...');
+    const result = await extractor.extractAndUpload();
     
     if (result.success) {
-      logger.info('✅ Caplena upload completed successfully!', result.stats);
-      console.log(`\n✅ Caplena upload completed successfully!`);
+      logger.info('✅ Fresh data extraction and Caplena upload completed successfully!', result.stats);
+      console.log(`\n✅ Fresh data extraction and Caplena upload completed successfully!`);
       console.log(`📊 Statistics:`);
       console.log(`   - Conversations: ${result.stats.conversationCount}`);
       console.log(`   - Total Messages: ${result.stats.totalMessages}`);
@@ -240,13 +240,15 @@ async function main() {
       console.log(`   - Project ID: ${result.project?.id || 'N/A'}`);
       console.log(`   - Uploaded: ${result.uploadResult.uploadedCount} conversations`);
       console.log(`   - Batches: ${result.uploadResult.batchCount}`);
+      console.log(`📁 CSV Export:`);
+      console.log(`   - File: ${result.outputPath}`);
     } else {
-      console.log(`\n❌ Upload failed: ${result.error}`);
+      console.log(`\n❌ Process failed: ${result.error}`);
     }
 
   } catch (error) {
-    logger.error('❌ Upload failed', { error: error.message });
-    console.error('\n❌ Upload failed:', error.message);
+    logger.error('❌ Process failed', { error: error.message });
+    console.error('\n❌ Process failed:', error.message);
     process.exit(1);
   }
 }
