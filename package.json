@@ -10,6 +10,7 @@
     "sync:test": "node src/dailySyncCLI.js --test",
     "sync:test:1h": "node src/dailySyncCLI.js --test --hours=1",
     "sync:test:6h": "node src/dailySyncCLI.js --test --hours=6",
+    "railway": "node src/railway.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/",
@@ -28,6 +29,7 @@
   "dependencies": {
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
+    "express": "^4.21.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {
@@ -38,4 +40,4 @@
   "engines": {
     "node": ">=16.0.0"
   }
-} 
+}

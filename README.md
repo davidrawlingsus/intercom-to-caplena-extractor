@@ -85,6 +85,47 @@ CAPLENA_BASE_URL=https://api.caplena.com
 OUTPUT_CSV_PATH=./exports/intercom_transcripts.csv
 ```
 
+## Railway Deployment
+
+Railway is perfect for running the daily sync as a managed service. Here's how to deploy:
+
+### 1. Connect to Railway
+
+1. Install Railway CLI: `npm i -g @railway/cli`
+2. Login: `railway login`
+3. Link your project: `railway link`
+
+### 2. Set Environment Variables
+
+```bash
+railway variables set INTERCOM_ACCESS_TOKEN=your_intercom_token
+railway variables set CAPLENA_API_KEY=your_caplena_api_key
+railway variables set CAPLENA_BASE_URL=https://api.caplena.com
+railway variables set OUTPUT_CSV_PATH=./exports/intercom_transcripts.csv
+```
+
+### 3. Deploy
+
+```bash
+railway up
+```
+
+### 4. Monitor
+
+- **Logs**: `railway logs`
+- **Status**: `railway status`
+- **Manual sync**: Visit `https://your-app.railway.app/sync`
+- **Test sync**: Visit `https://your-app.railway.app/test?hours=6`
+
+### Railway Features
+
+- **Automatic scheduling**: Runs daily at 9 AM UTC
+- **Health checks**: `/health` endpoint for monitoring
+- **Manual triggers**: `/sync` endpoint for immediate sync
+- **Test endpoints**: `/test?hours=24` for testing
+- **Auto-restart**: On failure with retry logic
+- **Logging**: All logs available in Railway dashboard
+
 ## Cron Job Setup
 
 To run the daily sync automatically, add to your crontab:
