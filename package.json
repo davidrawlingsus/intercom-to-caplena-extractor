@@ -6,6 +6,10 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "sync": "node src/dailySyncCLI.js",
+    "sync:test": "node src/dailySyncCLI.js --test",
+    "sync:test:1h": "node src/dailySyncCLI.js --test --hours=1",
+    "sync:test:6h": "node src/dailySyncCLI.js --test --hours=6",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/",

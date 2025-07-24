@@ -74,6 +74,69 @@ class IntercomService {
   }
 
   /**
+   * Get conversations since a specific timestamp
+   */
+  async getConversationsSince(sinceTimestamp, limit = 1000) {
+    try {
+      logger.info('Fetching conversations since timestamp', { 
+        sinceTimestamp, 
+        sinceDate: new Date(sinceTimestamp * 1000).toISOString(),
+        limit 
+      });
+
+      const conversations = [];
+      let page = 1;
+      let startingAfter = null;
+      let hasMore = true;
+
+      while (hasMore && conversations.length < limit) {
+        const response = await this.getConversations(page, 50, startingAfter);
+        
+        if (!response.conversations || response.conversations.length === 0) {
+          logger.info('No more conversations found');
+          break;
+        }
+
+        // Filter conversations by timestamp
+        const filteredConversations = response.conversations.filter(conversation => {
+          const updatedAt = parseInt(conversation.updated_at);
+          return updatedAt >= sinceTimestamp;
+        });
+
+        // If we find conversations older than our timestamp, we can stop
+        if (filteredConversations.length < response.conversations.length) {
+          logger.info('Found conversations older than timestamp, stopping pagination');
+          conversations.push(...filteredConversations);
+          break;
+        }
+
+        conversations.push(...filteredConversations);
+
+        // Check if we have more pages
+        if (response.pages && response.pages.next) {
+          startingAfter = response.pages.next.starting_after;
+          page++;
+        } else {
+          hasMore = false;
+        }
+
+        // Add a small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      logger.info(`Found ${conversations.length} conversations since timestamp`);
+      return conversations;
+
+    } catch (error) {
+      logger.error('Failed to fetch conversations since timestamp', { 
+        sinceTimestamp, 
+        error: error.message 
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Get a single conversation by ID with full transcript
    */
   async getConversation(conversationId) {

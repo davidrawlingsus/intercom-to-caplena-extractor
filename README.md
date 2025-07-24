@@ -1,139 +1,154 @@
-# Intercom to Caplena Chat Transcript Extractor
+# Intercom to Caplena Extractor
 
-This application extracts entire chat transcripts from Intercom and posts them to Caplena for analysis.
+Extract chat transcripts from Intercom and post them to Caplena for text analysis.
 
 ## Features
 
-- Extract complete chat conversations from Intercom
-- Transform chat data into Caplena-compatible format
-- Post transcripts to Caplena for sentiment analysis and insights
-- Configurable rate limiting and error handling
-- Comprehensive logging
+- 🔄 **Bulk Export**: Extract all historical conversations from Intercom
+- 📊 **CSV Export**: Save transcripts to CSV format
+- 🚀 **Caplena Integration**: Upload conversations to Caplena for analysis
+- ⚡ **Daily Sync**: Automated daily sync of new conversations
+- 🧪 **Test Mode**: Test sync functionality with custom time windows
 
-## Setup
+## Installation
 
-### Prerequisites
-
-- Node.js 16.0.0 or higher
-- Intercom API access token
-- Caplena API key
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd intercom_to_caplena
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Set up environment variables:
-```bash
-cp env.example .env
-```
-
-4. Edit `.env` file with your API credentials:
-```env
-INTERCOM_ACCESS_TOKEN=your_intercom_access_token_here
-CAPLENA_API_KEY=your_caplena_api_key_here
-```
-
-### Configuration
-
-The application uses the following environment variables:
-
-- `INTERCOM_ACCESS_TOKEN`: Your Intercom API access token
-- `INTERCOM_BASE_URL`: Intercom API base URL (defaults to https://api.intercom.io)
-- `CAPLENA_API_KEY`: Your Caplena API key
-- `CAPLENA_BASE_URL`: Caplena API base URL (defaults to https://api.caplena.com)
-- `NODE_ENV`: Environment (development, test, production)
-- `LOG_LEVEL`: Logging level (info, debug, warn, error)
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Copy `.env.example` to `.env` and configure your API keys
+4. Run the application: `npm start`
 
 ## Usage
 
-### Development
+### Initial Bulk Export
 
-```bash
-npm run dev
-```
-
-### Production
+To export all historical conversations and upload to Caplena:
 
 ```bash
 npm start
 ```
 
-### Testing
+This will:
+- Fetch all conversations from Intercom
+- Extract user messages and transcripts
+- Export to CSV file
+- Upload to Caplena project
+
+### Daily Sync
+
+To sync new conversations from the last 24 hours:
 
 ```bash
-npm test
+npm run sync
 ```
 
-## Project Structure
+### Testing Daily Sync
 
-```
-intercom_to_caplena/
-├── src/
-│   ├── index.js              # Main application entry point
-│   ├── services/
-│   │   ├── intercom.js       # Intercom API integration
-│   │   └── caplena.js        # Caplena API integration
-│   ├── utils/
-│   │   ├── logger.js         # Logging configuration
-│   │   └── transformers.js   # Data transformation utilities
-│   └── config/
-│       └── index.js          # Configuration management
-├── tests/                    # Test files
-├── .env                      # Environment variables (create from env.example)
-├── .gitignore               # Git ignore rules
-├── package.json             # Project dependencies and scripts
-└── README.md               # This file
+Test the sync functionality with different time windows:
+
+```bash
+# Test with last 24 hours (default)
+npm run sync:test
+
+# Test with last 1 hour
+npm run sync:test:1h
+
+# Test with last 6 hours
+npm run sync:test:6h
+
+# Test with custom hours
+node src/dailySyncCLI.js --test --hours=12
 ```
 
-## API Integration
+### Manual CSV Upload
+
+To upload existing CSV data to Caplena:
+
+```bash
+npm start
+```
+
+(When CSV file exists, it will upload the data instead of fetching from Intercom)
+
+## Configuration
+
+Create a `.env` file with your API credentials:
+
+```env
+# Intercom API
+INTERCOM_ACCESS_TOKEN=your_intercom_token
+
+# Caplena API
+CAPLENA_API_KEY=your_caplena_api_key
+CAPLENA_BASE_URL=https://api.caplena.com
+
+# Output settings
+OUTPUT_CSV_PATH=./exports/intercom_transcripts.csv
+```
+
+## Cron Job Setup
+
+To run the daily sync automatically, add to your crontab:
+
+```bash
+# Run daily sync at 9 AM every day
+0 9 * * * cd /path/to/intercom-to-caplena && npm run sync >> /var/log/intercom-sync.log 2>&1
+```
+
+## API Endpoints
 
 ### Intercom API
-
-The application connects to Intercom's API to:
-- Retrieve conversation lists
-- Extract full conversation transcripts
-- Handle pagination for large datasets
+- Fetches conversations with pagination
+- Extracts full conversation transcripts
+- Filters for user messages only
 
 ### Caplena API
+- Creates/finds projects
+- Bulk uploads conversations (20 rows per batch)
+- Rate limiting (10 requests per second)
 
-The application posts data to Caplena's API to:
-- Upload conversation transcripts
-- Configure analysis parameters
-- Retrieve analysis results
+## File Structure
 
-## Error Handling
-
-The application includes comprehensive error handling for:
-- API rate limiting
-- Network connectivity issues
-- Invalid API responses
-- Data transformation errors
+```
+src/
+├── index.js              # Main application (bulk export)
+├── dailySync.js          # Daily sync functionality
+├── dailySyncCLI.js       # CLI for daily sync
+├── services/
+│   ├── intercom.js       # Intercom API service
+│   └── caplena.js        # Caplena API service
+└── utils/
+    ├── csvExporter.js    # CSV export utilities
+    └── logger.js         # Logging configuration
+```
 
 ## Logging
 
-All operations are logged using Winston with configurable levels:
-- `info`: General application flow
-- `debug`: Detailed API interactions
-- `warn`: Non-critical issues
-- `error`: Critical errors
+All operations are logged to:
+- Console output
+- `logs/combined.log` (all levels)
+- `logs/error.log` (errors only)
 
-## Contributing
+## Error Handling
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+- Automatic retry for API failures
+- Graceful handling of rate limits
+- Detailed error logging
+- Fallback modes for partial failures
 
-## License
+## Rate Limits
 
-MIT License - see LICENSE file for details 
+- **Intercom**: 10 requests per second
+- **Caplena**: 10 requests per second
+- Built-in delays between API calls
+
+## Data Format
+
+### CSV Export
+- Conversation ID, timestamps, subject
+- Message content, author type, message metadata
+- UTF-8 encoding with proper escaping
+
+### Caplena Upload
+- Text field: Combined user messages
+- Metadata: Conversation ID, timestamps, message counts
+- Proper data type conversion (timestamps as strings) 
